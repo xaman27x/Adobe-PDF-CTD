@@ -38,14 +38,18 @@ class HeadingDetector:
         if not text: return "Other"
         # Unicode Ranges for Scripts -> (From Unicode Standard Block Chart)
         scripts = {
-            "Latin": [(0x0020, 0x024F)],
-            "Cyrillic": [(0x0400, 0x052F)],
-            "Arabic": [(0x0600, 0x06FF)],
-            "Hebrew": [(0x0590, 0x05FF)],
-            "Indic": [(0x0900, 0x0D7F)],
-            "CJK": [(0x4E00, 0x9FFF), (0x3040, 0x309F), (0x30A0, 0x30FF)], # Chinese. Japanese, Korean
-            "Thai": [(0x0E00, 0x0E7F)],
-            "Greek": [(0x0370, 0x03FF)],
+            "Latin": [(0x0020, 0x024F)], "Cyrillic": [(0x0400, 0x052F)],
+            "Arabic": [(0x0600, 0x06FF)], "Hebrew": [(0x0590, 0x05FF)],
+            "Devanagari": [(0x0900, 0x097F)], "Bengali": [(0x0980, 0x09FF)],
+            "Gurmukhi": [(0x0A00, 0x0A7F)], "Gujarati": [(0x0A80, 0x0AFF)],
+            "Oriya": [(0x0B00, 0x0B7F)], "Tamil": [(0x0B80, 0x0BFF)],
+            "Telugu": [(0x0C00, 0x0C7F)], "Kannada": [(0x0C80, 0x0CFF)],
+            "Malayalam": [(0x0D00, 0x0D7F)], "Sinhala": [(0x0D80, 0x0DFF)],
+            "Thai": [(0x0E00, 0x0E7F)], "Lao": [(0x0E80, 0x0EFF)],
+            "Tibetan": [(0x0F00, 0x0FFF)], "Myanmar": [(0x1000, 0x109F)],
+            "Georgian": [(0x10A0, 0x10FF)], "Hangul": [(0xAC00, 0xD7AF)],
+            "Greek": [(0x0370, 0x03FF)], "Armenian": [(0x0530, 0x058F)],
+            "CJK": [(0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0x3040, 0x30FF)] # Chinese, Japanese, Korean
         }
         counts = defaultdict(int)
         for char in text:
