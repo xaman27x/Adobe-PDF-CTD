@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from src.common.pdf_parser import PDFParser
-from src.round1_a.heading_extractor import HeadingDetector
+from src.round1_a.heading_detector import HeadingDetector
 
 # Definition of directories. This will be changed as per the guidelines.
 INPUT_DIR = Path("input")
