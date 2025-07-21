@@ -3,40 +3,31 @@ import math
 from collections import Counter, defaultdict
 from typing import List, Dict, Any
 import spacy
-# Spacy is a lightweight model used for lingusitic intelligence!
+
 
 class HeadingDetector:
     """
-    The definitive, competition-grade heading detection engine. This masterpiece
-    fuses statistical anomaly detection, lightweight linguistic analysis, and a
-    dynamic layout grammar to achieve unparalleled accuracy within a <100MB footprint.
+    Heading detection engine using statistical and linguistic features.
     """
 
     def __init__(self, doc_pages: List[Dict[str, Any]]):
         self.doc_pages = doc_pages
-        # Model is loaded once during intialization!
         try:
             self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
-            print("Model loaded")
         except OSError:
-            print("Error loading model")
-            raise
-
-        # Pipeline
+            raise RuntimeError("Failed to load SpaCy model.")
+        
         self.lines = self._preprocess_and_featurize()
         self.stats = self._calculate_document_statistics()
         self._tag_contextual_roles()
-        self.classified_headings = [] # This list will hold the final classified headings
-        print("  -> Statistical and contextual analysis complete.")
+        self.classified_headings = []
 
-
-    ### Pass 1: Preprocessing/Featurization (v<>)
+    # === Pass 1: Preprocessing / Featurization === #
 
     def _get_script(self, text: str) -> str:
-        """Identifies the script(Language family) of the text with the help of unicodes"""
+        if not text:
+            return "Other"
 
-        if not text: return "Other"
-        # Unicode Ranges for Scripts -> (From Unicode Standard Block Chart)
         scripts = {
             "Latin": [(0x0020, 0x024F)], "Cyrillic": [(0x0400, 0x052F)],
             "Arabic": [(0x0600, 0x06FF)], "Hebrew": [(0x0590, 0x05FF)],
@@ -49,118 +40,141 @@ class HeadingDetector:
             "Tibetan": [(0x0F00, 0x0FFF)], "Myanmar": [(0x1000, 0x109F)],
             "Georgian": [(0x10A0, 0x10FF)], "Hangul": [(0xAC00, 0xD7AF)],
             "Greek": [(0x0370, 0x03FF)], "Armenian": [(0x0530, 0x058F)],
-            "CJK": [(0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0x3040, 0x30FF)] # Chinese, Japanese, Korean
+            "CJK": [(0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0x3040, 0x30FF)]
         }
+
         counts = defaultdict(int)
         for char in text:
-            char_ord = ord(char); found = False
-            for script_name, ranges in scripts.items():
-                for start, end in ranges:
-                    if start <= char_ord <= end: counts[script_name] += 1; found = True; break
-                if found: break
+            code = ord(char)
+            for script, ranges in scripts.items():
+                if any(start <= code <= end for start, end in ranges):
+                    counts[script] += 1
+                    break
         return max(counts, key=counts.get) if counts else "Other"
-    
 
     def _preprocess_and_featurize(self) -> List[Dict[str, Any]]:
-        """Single pass method to extract, merge, and featurize all lines."""
-
         raw_lines = []
-        # Time Complexity: O(n*m) -> for n pages and avg n blocks per page
-        for i, page in enumerate(self.doc_pages):
-            page_dims = {"width": page.get("width", 612), "height": page.get("height", 792)}
-            for block in page.get("blocks", []):
-                if block.get("type") == 0:
-                    for line in block.get("lines", []):
-                        if not line.get("spans"): continue
-                        text = "".join([s["text"] for s in line["spans"]]).strip()
-                        if not text: continue
-                        raw_lines.append(self._extract_initial_features(line, text, i + 1, page_dims))
-        
-        merged_lines = self._merge_fragmented_lines(raw_lines)
-        
-        for i, line in enumerate(merged_lines):
-            prev_line = merged_lines[i-1] if i > 0 and merged_lines[i-1]['page_num'] == line['page_num'] else None
-            line['space_before'] = line['bbox'][1] - prev_line['bbox'][3] if prev_line else 20.0
-            
-            # This adds linguistic features
-            doc_nlp = self.nlp(line['text'])
-            total_words = len(doc_nlp)
-            if total_words > 0:
-                line['noun_ratio'] = sum(1 for token in doc_nlp if token.pos_ == 'NOUN') / total_words
-                line['verb_ratio'] = sum(1 for token in doc_nlp if token.pos_ == 'VERB') / total_words
-            else:
-                line['noun_ratio'] = 0; line['verb_ratio'] = 0
-        return merged_lines
-    
 
-    def _extract_initial_features(self, line: Dict[str, Any], text: str, page_num: int, page_dims: Dict[str, float]) -> Dict[str, Any]:
-        """Initial feature extraction for a single line of text. This passes the text to a Rich Vector"""
-        span = line['spans'][0]
-        page_height = page_dims.get('height', 792)
+        for i, page in enumerate(self.doc_pages):
+            page_width = page.get("width", 612)
+            page_height = page.get("height", 792)
+            page_dims = {"width": page_width, "height": page_height}
+
+            for block in page.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    spans = line.get("spans", [])
+                    if not spans:
+                        continue
+                    text = "".join(span["text"] for span in spans).strip()
+                    if not text:
+                        continue
+                    raw_lines.append(
+                        self._extract_initial_features(line, text, i + 1, page_dims)
+                    )
+
+        merged_lines = self._merge_fragmented_lines(raw_lines)
+
+        for i, line in enumerate(merged_lines):
+            prev_line = (
+                merged_lines[i - 1] if i > 0 and merged_lines[i - 1]["page_num"] == line["page_num"] else None
+            )
+            line["space_before"] = (
+                line["bbox"][1] - prev_line["bbox"][3] if prev_line else 20.0
+            )
+
+            doc_nlp = self.nlp(line["text"])
+            total = len(doc_nlp)
+            line["noun_ratio"] = sum(1 for t in doc_nlp if t.pos_ == "NOUN") / total if total else 0
+            line["verb_ratio"] = sum(1 for t in doc_nlp if t.pos_ == "VERB") / total if total else 0
+
+        return merged_lines
+
+    def _extract_initial_features(self, line, text, page_num, page_dims):
+        span = line["spans"][0]
+        height = page_dims["height"]
         return {
             "text": text,
-            "page_num": page_num, 
+            "page_num": page_num,
             "bbox": line["bbox"],
-            "font_size": round(span["size"], 2), 
-            "font_name": span["font"],"script": self._get_script(text), 
+            "font_size": round(span["size"], 2),
+            "font_name": span["font"],
+            "script": self._get_script(text),
             "role": "content",
             "is_bold": "bold" in span["font"].lower() or (span["flags"] & 1 << 4),
             "is_all_caps": text.isupper() and len(text) > 2 and self._get_script(text) == "Latin",
             "word_count": len(text.split()),
-            "y_percent": line['bbox'][1] / page_height if page_height > 0 else 0
+            "y_percent": line["bbox"][1] / height if height else 0
         }
 
     def _merge_fragmented_lines(self, lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """A fix method: This method merges fragmented lines based on proximal distance and font size."""
-        if not lines: return []
-        merged = []; buffer = lines[0]
-        for i in range(1, len(lines)):
-            curr = lines[i]
-            v_dist = abs(curr['bbox'][1] - buffer['bbox'][3])
-            if (curr['page_num'] == buffer['page_num'] and curr['font_size'] == buffer['font_size'] and v_dist < (buffer['font_size'] * 0.4)):
-                buffer['text'] += " " + curr['text']
-                buffer['bbox'] = (min(buffer['bbox'][0], curr['bbox'][0]), min(buffer['bbox'][1], curr['bbox'][1]), max(buffer['bbox'][2], curr['bbox'][2]), max(buffer['bbox'][3], curr['bbox'][3]))
+        if not lines:
+            return []
+
+        merged = []
+        buffer = lines[0]
+
+        for curr in lines[1:]:
+            vertical_gap = abs(curr["bbox"][1] - buffer["bbox"][3])
+            if (
+                curr["page_num"] == buffer["page_num"]
+                and curr["font_size"] == buffer["font_size"]
+                and vertical_gap < buffer["font_size"] * 0.4
+            ):
+                buffer["text"] += " " + curr["text"]
+                buffer["bbox"] = (
+                    min(buffer["bbox"][0], curr["bbox"][0]),
+                    min(buffer["bbox"][1], curr["bbox"][1]),
+                    max(buffer["bbox"][2], curr["bbox"][2]),
+                    max(buffer["bbox"][3], curr["bbox"][3])
+                )
             else:
-                merged.append(buffer); buffer = curr
+                merged.append(buffer)
+                buffer = curr
+
         merged.append(buffer)
         return merged
 
-
-    ### Pass 2: Statistical & Contextual Analysis
+    # === Pass 2: Statistical & Contextual Analysis === #
 
     def _calculate_document_statistics(self) -> Dict[str, float]:
-        """The entire doc's typographic statistics are calculated here."""
-        
-        content_lines = [l for l in self.lines if 7 < l['font_size'] < 30]
-        if not content_lines: return {"mean_size": 10, "std_dev_size": 1, "body_size": 10, "mean_space": 3}
-        font_sizes = [l['font_size'] for l in content_lines]
-        spaces = [l['space_before'] for l in content_lines if 0 < l['space_before'] < 20]
-        mean_size = sum(font_sizes) / len(font_sizes) if font_sizes else 10
-        std_dev_size = math.sqrt(sum([(s - mean_size) ** 2 for s in font_sizes]) / len(font_sizes)) if len(font_sizes) > 1 else 1.0
+        content = [l for l in self.lines if 7 < l["font_size"] < 30]
+        if not content:
+            return {"mean_size": 10, "std_dev_size": 1, "body_size": 10, "mean_space": 3}
+
+        font_sizes = [l["font_size"] for l in content]
+        spaces = [l["space_before"] for l in content if 0 < l["space_before"] < 20]
+        mean = sum(font_sizes) / len(font_sizes)
+        std_dev = math.sqrt(sum((s - mean) ** 2 for s in font_sizes) / len(font_sizes)) if len(font_sizes) > 1 else 1.0
+
         return {
-            "mean_size": mean_size, 
-            "std_dev_size": max(std_dev_size, 1.0), 
-            "body_size": Counter(font_sizes).most_common(1)[0][0] if font_sizes else 10, 
-            "mean_space": sum(spaces)/len(spaces) if spaces else 3.0
+            "mean_size": mean,
+            "std_dev_size": max(std_dev, 1.0),
+            "body_size": Counter(font_sizes).most_common(1)[0][0],
+            "mean_space": sum(spaces) / len(spaces) if spaces else 3.0
         }
 
     def _tag_contextual_roles(self):
-        """Tags lines based on context: position, repetition, and keywords."""
-        noise_candidates = defaultdict(list)
+        noise = defaultdict(list)
         for line in self.lines:
-            if line['y_percent'] < 0.10: line['role'] = 'potential_header' # Appears at the top 10% of the page
-            if line['y_percent'] > 0.90: line['role'] = 'potential_footer' # Appears at the bottom 10% of the page
-            if line['role'] in ['potential_header', 'potential_footer']: noise_candidates[line['text']].append(line)
-        for text, occurrences in noise_candidates.items():
+            if line["y_percent"] < 0.10:
+                line["role"] = "potential_header"
+            elif line["y_percent"] > 0.90:
+                line["role"] = "potential_footer"
 
-            # A true header/footer must appear on more than one page
-            if len(set(o['page_num'] for o in occurrences)) > 1:
-                for line in occurrences: line['role'] = 'noise'
+            if line["role"] in {"potential_header", "potential_footer"}:
+                noise[line["text"]].append(line)
 
-        h1_keywords = {'en': ['chapter', 'introduction', 'conclusion', 'references', 'appendix'], 'ar': ['الفصل', 'مقدمة']}
+        for text, lines in noise.items():
+            if len(set(l["page_num"] for l in lines)) > 1:
+                for l in lines:
+                    l["role"] = "noise"
+
+        keywords = {'en': ['chapter', 'introduction', 'conclusion', 'references', 'appendix']}
         for line in self.lines:
-            if line['word_count'] < 5 and any(line['text'].lower().startswith(kw) for kw in h1_keywords.get('en', [])):
-                line['role'] = 'h1_keyword'
+            if line["word_count"] < 5 and any(line["text"].lower().startswith(k) for k in keywords['en']):
+                line["role"] = "h1_keyword"
 
 
     ### Pass 3: The Hybrid Scoring & Classification Engine
@@ -201,7 +215,7 @@ class HeadingDetector:
             candidates = [line for line in scored_lines if line['score'] > dynamic_threshold]
             self._refine_and_finalize(candidates)
         
-        title_text = "Document Title Not Found"
+        title_text = ""
         if self.classified_headings:
             title_candidates = [h for h in self.classified_headings if h['page_num'] == 1 and h['y_percent'] < 0.4]
             if title_candidates:
